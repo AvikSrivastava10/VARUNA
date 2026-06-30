@@ -82,7 +82,7 @@ def main():
 
     opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
-    scaler = torch.cuda.amp.GradScaler(enabled=(dev.type == "cuda"))
+    scaler = torch.amp.GradScaler("cuda", enabled=(dev.type == "cuda"))
 
     best_val, best_epoch, bad = float("inf"), -1, 0
     hist = {"train": [], "val": []}

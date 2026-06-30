@@ -28,7 +28,7 @@ This document is the engineering plan. It is intentionally specific so the build
 - `prepare.py` — regrid temperature → 0.25° rain grid (one common national grid), build land mask, smoothed day-of-year **climatology from TRAIN years only**, anomaly statistics. Saves `data/processed/{obs.nc, clim_rain.nc, clim_temp.nc, stats.json, landmask.npy, grid.npz, meta.json}`.
 - `climatology.py` — circular-smoothed day-of-year climatology + anomaly conversions.
 
-**Span & split (no leakage):** train 2010–2021 · val 2022 · test 2023–2024.
+**Span & split (no leakage):** train 1981–2018 (38 yr) · val 2019–2020 · test 2021–2024.
 
 ---
 
@@ -70,7 +70,7 @@ Original dark "orbital" theme (`viz/theme.py`), interactive national maps with r
 ---
 
 ## 6. Milestones
-1. ✅ Real IMD download (2010–2024) + processed cache.
+1. ✅ Real IMD download (1981–2024) + processed cache.
 2. ⏳ Train ClimateUNet on GPU; lock checkpoint.
 3. ⏳ Run evaluation; record headline skill numbers.
 4. ⏳ Build dashboard (theme, maps, forecast, what-if, assimilation).

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import glob
 import os
+import re
 import sys
 
 import numpy as np
@@ -43,6 +44,39 @@ def available_files():
     return sorted(glob.glob(os.path.join(INSAT_DIR, "*.h5")) +
                   glob.glob(os.path.join(INSAT_DIR, "*.hdf")) +
                   glob.glob(os.path.join(INSAT_DIR, "*.nc")))
+
+
+# INSAT-3D/3DR product names embed the acquisition stamp as e.g. 29JUN2026_0815
+_DATE_RE = re.compile(r"(\d{2})([A-Z]{3})(\d{4})(?:[_-](\d{4}))?", re.IGNORECASE)
+_MONTHS = {"JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
+           "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12}
+
+
+def product_datetime(filename):
+    """Parse the acquisition timestamp from an INSAT product filename.
+
+    Handles the standard MOSDAC naming, e.g. ``3RIMG_29JUN2026_0815_L2B_LST``
+    -> pandas.Timestamp('2026-06-29 08:15'). Returns None if no stamp is found.
+    """
+    import pandas as pd
+
+    m = _DATE_RE.search(os.path.basename(filename))
+    if not m:
+        return None
+    day, mon, year, hhmm = m.group(1), m.group(2).upper(), m.group(3), m.group(4)
+    if mon not in _MONTHS:
+        return None
+    hh, mm = (int(hhmm[:2]), int(hhmm[2:])) if hhmm else (0, 0)
+    try:
+        return pd.Timestamp(int(year), _MONTHS[mon], int(day), hh, mm)
+    except ValueError:
+        return None
+
+
+def product_doy(filename):
+    """Day-of-year (1..366) for an INSAT product filename, or None."""
+    ts = product_datetime(filename)
+    return None if ts is None else min(int(ts.dayofyear), 366)
 
 
 def has_data():

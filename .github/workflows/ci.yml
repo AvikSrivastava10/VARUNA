@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Lint-free compile + smoke checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install lightweight dependencies
+        # Only the deps the data-free CI gates need (numpy / scipy / matplotlib /
+        # plotly). Heavy stacks (torch, xgboost, imdlib, netCDF4, h5py) are not
+        # required because tools/ci_check.py never imports them.
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas scipy matplotlib plotly
+
+      - name: Run CI checks
+        run: python tools/ci_check.py

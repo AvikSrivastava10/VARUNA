@@ -34,7 +34,7 @@ short_description: AI Digital Twin of India's Climate - ISRO BAH 2026 (PS#5)
 
 # files/folders that must NOT be uploaded (large, rebuildable, or local-only)
 IGNORE = [
-    "data/raw/*", "data/processed/anom_cube.npy",
+    "data/raw/*", "data/processed/anom_cube*.npy",
     ".git/*", ".git*/**", ".venv/*", "venv/*", "**/__pycache__/*", "*.pyc",
     "README.md",  # uploaded separately with front-matter
 ]

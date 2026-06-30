@@ -48,6 +48,12 @@ def load_eval():
     return json.load(open(p)) if os.path.exists(p) else None
 
 
+@st.cache_data
+def load_xgb_report():
+    p = os.path.join(C.OUTPUTS_DIR, "xgb_report.json")
+    return json.load(open(p)) if os.path.exists(p) else None
+
+
 @st.cache_resource
 def load_xgb():
     try:
@@ -78,6 +84,7 @@ cube, dates, carr, std, fc = B["cube"], B["dates"], B["carr"], B["std"], B["fore
 lats, lons = grid["lat"], grid["lon"]
 EVAL = load_eval()
 XGB = load_xgb()
+XGB_REPORT = load_xgb_report()
 
 t_lo, t_hi = C.INPUT_DAYS, len(dates) - C.HORIZON
 test_default = next((i for i in range(t_hi, t_lo, -1) if dates[i].year in C.TEST_YEARS), t_hi)
@@ -277,23 +284,19 @@ elif view == VIEWS[1]:
 
     # hazard-area trend across the 10-day horizon
     st.markdown("#### 📈 Hazard exposure across the forecast horizon")
-    leads = list(range(1, C.HORIZON + 1))
+    clim_tmax_seq = np.stack([clim_field("tmax", k) for k in range(C.HORIZON)])
+    summary = extremes.summarize_forecast_hazards(frames, clim_tmax_seq, landmask)
+    leads = summary["leads"]
     if haz.startswith("🔥"):
-        ser = [float(np.mean(extremes.heatwave_severity(
-            frames["tmax"][k], clim_field("tmax", k))[landmask] >= 1) * 100) for k in range(C.HORIZON)]
-        tfig = maps.line_figure(leads, {"Area under heatwave": ser},
+        tfig = maps.line_figure(leads, {"Area under heatwave": summary["heatwave_area_pct"]},
                                 "Heatwave-affected land area", "% of land", height=280,
                                 colors=["#FF7B00"])
     elif haz.startswith("🌧️"):
-        ser = [float(np.mean(extremes.rain_category(frames["rain"][k])[landmask] >= 2) * 100)
-               for k in range(C.HORIZON)]
-        tfig = maps.line_figure(leads, {"Heavy+ rain area": ser},
+        tfig = maps.line_figure(leads, {"Heavy+ rain area": summary["heavy_rain_area_pct"]},
                                 "Heavy-rain land area", "% of land", height=280,
                                 colors=["#22D3EE"])
     else:
-        ser = [float(np.mean(extremes.dry_spell_index(
-            np.stack([frames["rain"][j] for j in range(k + 1)]))[landmask])) for k in range(C.HORIZON)]
-        tfig = maps.line_figure(leads, {"Mean dry-run length": ser},
+        tfig = maps.line_figure(leads, {"Mean dry-run length": summary["dry_spell_mean_days"]},
                                 "Drought / dry-spell build-up", "days", height=280,
                                 colors=["#A7F3D0"])
     st.plotly_chart(tfig, use_container_width=True, key="haztrend")
@@ -390,6 +393,25 @@ elif view == VIEWS[3]:
             "Day-1 skill over operational baselines", "% improvement", height=300)
         st.plotly_chart(bar, use_container_width=True, key="skillbar")
 
+    # companion model — XGBoost validation skill (real units, val years 2019–2020)
+    if XGB_REPORT:
+        units = {"rain": "mm", "tmax": "°C", "tmin": "°C"}
+        st.markdown("#### Companion model — XGBoost (station ensemble)")
+        xcols = st.columns(3)
+        for j, v in enumerate(C.VARIABLES):
+            with xcols[j]:
+                xr_ = XGB_REPORT[v]["val_rmse_real"]
+                # day-1 ClimateUNet RMSE (test) shown as delta context where available
+                delta = None
+                if EVAL is not None:
+                    cnn_r = EVAL["ai"][v]["rmse"][0]
+                    delta = f"ClimateUNet d1 {cnn_r:.2f} {units[v]}"
+                st.metric(f"{theme.LABELS[v]} · XGB val RMSE",
+                          f"{xr_:.2f} {units[v]}", delta, delta_color="off")
+        st.caption("XGBoost validation RMSE (2019–2020, real units) from "
+                   "`outputs/xgb_report.json`. The two paradigms — spatial CNN and "
+                   "tabular boosting — are blended in the city forecast below.")
+
     st.markdown("---")
     st.markdown("### City forecast — ClimateUNet" + (" + XGBoost ensemble" if XGB else ""))
     city = st.selectbox("Location", list(C.CITIES.keys()))
@@ -405,9 +427,22 @@ elif view == VIEWS[3]:
             "series": ["observed"] * hist_n + ["ClimateUNet"] * C.HORIZON}
     if XGB:
         xv = XGB.predict_cell(cube, dates, carr, std, grid, t, iy, ix)[base_var]
-        ens = [0.5 * cnn_vals[k] + 0.5 * float(xv[k]) for k in range(C.HORIZON)]
+        # default blend weight from inverse validation error (skill-weighted):
+        # the more accurate model gets the larger share, and a slider lets the
+        # planner rebalance manually.
+        cnn_r = EVAL["ai"][base_var]["rmse"][0] if EVAL else 1.0
+        xgb_r = XGB_REPORT[base_var]["val_rmse_real"] if XGB_REPORT else 1.0
+        w_def = ((1.0 / cnn_r) / ((1.0 / cnn_r) + (1.0 / xgb_r))
+                 if cnn_r > 0 and xgb_r > 0 else 0.5)
+        w_cnn = st.slider("ClimateUNet weight in ensemble", 0.0, 1.0,
+                          round(float(w_def), 2), 0.05,
+                          help="Default is inverse-RMSE (skill-weighted); drag to "
+                               "rebalance ClimateUNet vs XGBoost.")
+        ens = [w_cnn * cnn_vals[k] + (1.0 - w_cnn) * float(xv[k]) for k in range(C.HORIZON)]
         rows["date"] += fd; rows[theme.LABELS[base_var]] += ens
         rows["series"] += ["CNN+XGB ensemble"] * C.HORIZON
+        st.caption(f"Ensemble = {w_cnn:.2f}·ClimateUNet + {1-w_cnn:.2f}·XGBoost "
+                   "(default weights ∝ inverse validation RMSE).")
     df = pd.DataFrame(rows)
     import altair as alt
     rng = ["#22D3EE", "#FF7B00", "#A7F3D0"]
@@ -455,11 +490,15 @@ elif view == VIEWS[4]:
                     st.metric("Max", f"{np.max(vals):.1f} {unit}")
                 # Observed-vs-model cross-check (LST skin temp vs air tmax climatology)
                 if prod == "lst":
-                    doy = 180  # the product date's season; compared to air-temp normal
+                    # day-of-year parsed from the product filename (falls back to
+                    # mid-year if the stamp is absent) -> compare to the air-temp normal
+                    doy = insat.product_doy(res["file"]) or 180
                     air = carr["tmax"][doy - 1][landmask]
                     air = air[np.isfinite(air)]
                     st.markdown("#### Cross-check vs air temp")
-                    st.metric("Climatological air Tmax", f"{np.mean(air):.1f} °C")
+                    when = insat.product_datetime(res["file"])
+                    st.metric("Climatological air Tmax", f"{np.mean(air):.1f} °C",
+                              when.strftime("%d %b") if when is not None else None)
                     st.metric("Skin–air offset", f"{np.mean(vals)-np.mean(air):+.1f} °C")
                     st.caption("Satellite land-surface (skin) temperature runs hotter than "
                                "screen-level air Tmax — the positive offset is the expected "

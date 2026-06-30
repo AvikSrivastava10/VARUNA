@@ -18,6 +18,7 @@
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.56-FF4B4B?logo=streamlit&logoColor=white)](#the-dashboard)
 [![License](https://img.shields.io/badge/License-MIT-blue)](#citations--license)
 [![Reproducible](https://img.shields.io/badge/Pipeline-prepare%E2%86%92train%E2%86%92eval%E2%86%92serve-7E57C2)](#quickstart--reproduce)
+[![CI](https://github.com/Aditya060806/VARUNA/actions/workflows/ci.yml/badge.svg)](https://github.com/Aditya060806/VARUNA/actions/workflows/ci.yml)
 
 *Real data only · trained on‑device · reproducible end‑to‑end · nothing fake, nothing static.*
 
@@ -454,7 +455,7 @@ boundaries, smooth slider interaction (heavy panels isolated with `st.fragment`)
 | 🌍 **Climate Twin** | National/pilot AI forecast map · live state · OI assimilation panel |
 | 🌡️ **Hazards & Extremes** | Heatwave severity · heavy‑rain category · dry‑spell length |
 | 🧪 **What‑if Simulator** | Scenario sliders → live Heat‑stress / AQI / Cooling maps + impact metrics |
-| 📈 **Validation & Skill** | Per‑variable RMSE/ACC/skill, skill curves, city forecast (CNN + XGB ensemble) |
+| 📈 **Validation & Skill** | Per‑variable RMSE/ACC/skill, skill curves, XGBoost validation panel, city forecast (observed → ClimateUNet → skill‑weighted CNN+XGB ensemble) |
 | 🛰️ **Satellite (INSAT)** | Real INSAT‑3DR LST layer + satellite‑vs‑model cross‑check |
 | ℹ️ **About** | Methods & honest framing |
 
@@ -544,7 +545,9 @@ VARUNA/
 ├── tools/
 │   ├── render_previews.py     # static forecast previews
 │   ├── build_deck.py          # auto-fill DECK with real metrics
+│   ├── ci_check.py            # data-free CI gate (compile + import + numeric smoke)
 │   └── test_ui.py             # headless UI smoke test (AppTest)
+├── .github/workflows/ci.yml   # GitHub Actions — runs tools/ci_check.py on push/PR
 ├── outputs/                   # eval_metrics.json · skill_curves.png · previews
 ├── PLAN.md · DECK.md · DEMO.md
 └── requirements.txt
@@ -570,6 +573,24 @@ streamlit run app.py              # launch VARUNA
 ```
 
 Every stage is self‑contained — **no pre‑baked artefacts, no synthetic fallback.**
+
+### Continuous integration
+
+A lightweight **GitHub Actions** workflow (`.github/workflows/ci.yml`) runs on every push and pull
+request. It executes `tools/ci_check.py`, a data‑free gate that:
+
+1. **byte‑compiles** every module (catches syntax / indentation errors),
+2. **imports** the pure‑Python modules (config, analytics, scenario, twin, evaluation, viz, proxies, INSAT loader),
+3. **exercises the core numerics** on tiny synthetic arrays — heat index & CPCB AQI, hazard summaries, Optimal‑Interpolation, and the INSAT filename date parser.
+
+It installs only the light deps (`numpy`/`pandas`/`scipy`/`matplotlib`/`plotly`) and skips the heavy
+stacks (torch, xgboost, imdlib, netCDF4, h5py), so it runs in seconds. The full model + UI smoke
+test (`tools/test_ui.py`) needs the processed cache and checkpoints and is run locally.
+
+```bash
+python tools/ci_check.py          # same gate CI runs, locally
+python tools/test_ui.py           # full headless UI smoke test (needs data + checkpoints)
+```
 
 ---
 
