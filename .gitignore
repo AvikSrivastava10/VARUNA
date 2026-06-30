@@ -14,7 +14,7 @@ __pycache__/
 data/raw/
 
 # --- Rebuildable large cache (regenerated on first run from obs.nc in ~4s) ---
-data/processed/anom_cube.npy
+data/processed/anom_cube*.npy
 
 # --- OS cruft ---
 .DS_Store

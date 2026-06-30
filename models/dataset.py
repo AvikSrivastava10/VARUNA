@@ -13,6 +13,7 @@ forecast day, so there is no temporal leakage across splits.
 """
 from __future__ import annotations
 
+import glob
 import json
 import os
 import sys
@@ -59,9 +60,14 @@ def clim_arrays(clim):
 def build_anomaly_cube(obs, clim, stats):
     """Return (anom_scaled (T,H,W,3) float32, dates, clim_arr, std_vec).
 
-    The scaled-anomaly cube is cached to disk (processed/anom_cube.npy) so app /
-    eval startup is fast instead of rebuilding it (~90s) every time.
+    The scaled-anomaly cube is cached to disk so app / eval startup is fast
+    instead of rebuilding it (~90s) every time. The cache filename embeds a
+    short signature of the inputs (grid shape, date range and anomaly stats),
+    so any change to obs/climatology/stats automatically invalidates the cache
+    and triggers a rebuild instead of silently loading a stale cube.
     """
+    import hashlib
+
     dates = pd.to_datetime(obs["time"].values)
     doy = dates.dayofyear.values
     carr = clim_arrays(clim)
@@ -69,7 +75,15 @@ def build_anomaly_cube(obs, clim, stats):
 
     T = len(dates)
     H, W = obs["rain"].shape[1], obs["rain"].shape[2]
-    cache = _p("anom_cube.npy")
+
+    sig = hashlib.md5()
+    sig.update(np.ascontiguousarray(std).tobytes())
+    sig.update(repr((int(T), int(H), int(W))).encode())
+    sig.update(str(dates[0]).encode())
+    sig.update(str(dates[-1]).encode())
+    key = sig.hexdigest()[:12]
+    cache = _p(f"anom_cube_{key}.npy")
+
     if os.path.exists(cache):
         try:
             cube = np.load(cache, mmap_mode=None)
@@ -84,6 +98,13 @@ def build_anomaly_cube(obs, clim, stats):
         ov = obs[v].values.astype("float32")
         cube[..., vi] = (ov - carr[v][cidx]) / (std[vi] + 1e-6)
     try:
+        # purge stale cubes (old name + superseded signatures) before saving
+        for old in glob.glob(_p("anom_cube*.npy")):
+            if os.path.abspath(old) != os.path.abspath(cache):
+                try:
+                    os.remove(old)
+                except OSError:
+                    pass
         np.save(cache, cube)
     except Exception:
         pass

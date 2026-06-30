@@ -66,6 +66,46 @@ def heat_severity_band(v):
             2: ("Severe heatwave", "#FF2D55")}.get(int(round(v)), ("None", "#2DD4BF"))
 
 
-def summarize_forecast_hazards(frames, clim_tmax_doy, landmask):
-    """Headline hazard stats over a forecast horizon (frames: var->(H,W) per lead)."""
-    return frames  # placeholder hook; per-lead computed in the dashboard
+def summarize_forecast_hazards(frames, clim_tmax_seq, landmask):
+    """Per-lead hazard exposure across a forecast horizon (land-masked).
+
+    Parameters
+    ----------
+    frames : dict
+        ``{'tmax': (HORIZON,H,W), 'rain': (HORIZON,H,W), ...}`` forecast fields.
+    clim_tmax_seq : np.ndarray
+        ``(HORIZON,H,W)`` climatological Tmax for each lead day (heatwave departure).
+    landmask : np.ndarray
+        ``(H,W)`` boolean land mask.
+
+    Returns
+    -------
+    dict of lists (length = HORIZON):
+        ``leads``, ``heatwave_area_pct``, ``severe_heatwave_area_pct``,
+        ``heavy_rain_area_pct``, ``very_heavy_rain_area_pct``,
+        ``dry_spell_mean_days``.
+    """
+    tmax = np.asarray(frames["tmax"])
+    rain = np.asarray(frames["rain"])
+    clim = np.asarray(clim_tmax_seq)
+    horizon = tmax.shape[0]
+    lm = landmask.astype(bool)
+
+    out = {"leads": list(range(1, horizon + 1)),
+           "heatwave_area_pct": [], "severe_heatwave_area_pct": [],
+           "heavy_rain_area_pct": [], "very_heavy_rain_area_pct": [],
+           "dry_spell_mean_days": []}
+
+    for k in range(horizon):
+        sev = heatwave_severity(tmax[k], clim[k])[lm]
+        out["heatwave_area_pct"].append(float(np.mean(sev >= 1) * 100))
+        out["severe_heatwave_area_pct"].append(float(np.mean(sev >= 2) * 100))
+
+        cat = rain_category(rain[k])[lm]
+        out["heavy_rain_area_pct"].append(float(np.mean(cat >= 2) * 100))
+        out["very_heavy_rain_area_pct"].append(float(np.mean(cat >= 3) * 100))
+
+        dsi = dry_spell_index(rain[:k + 1])[lm]
+        out["dry_spell_mean_days"].append(float(np.mean(dsi)))
+
+    return out
